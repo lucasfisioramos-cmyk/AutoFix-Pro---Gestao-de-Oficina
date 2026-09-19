@@ -1,0 +1,5 @@
+{
+  "name": "GR OFICINA MECÂNICA - Gestão de Oficina",
+  "description": "Sistema completo para gestão de oficinas mecânicas, incluindo vistoria de entrada (checklist), histórico por placa, integração WhatsApp, gestão financeira com gráficos e controle de garantias.",
+  "requestFramePermissions": []
+}
