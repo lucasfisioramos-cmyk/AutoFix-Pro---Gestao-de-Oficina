@@ -2,152 +2,308 @@ import express from "express";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
-import { 
-  Customer, 
-  Employee, 
-  Part, 
-  ServiceOrder, 
-  MonthlyExpense, 
-  User, 
-  WorkshopInfo 
-} from "./src/types";
+import dotenv from "dotenv";
+
+dotenv.config({ path: ".env.local" });
+
+import { testConnection } from "./src/db/connection";
+import { runMigrations } from "./src/db/migrations";
+import { runSeed } from "./src/db/seed";
+import {
+  loadFullState,
+  WorkshopRepo,
+  UserRepo,
+  EmployeeRepo,
+  CustomerRepo,
+  PartRepo,
+  ServiceOrderRepo,
+  ExpenseRepo,
+} from "./src/db/repository";
+
+// ─── Tipos auxiliares ────────────────────────────────────────────────────────
+type WsMessage =
+  | { type: "GET_STATE" }
+  | { type: "UPDATE_WORKSHOP";  payload: any }
+  | { type: "CREATE_USER";      payload: any }
+  | { type: "UPDATE_USER";      payload: any }
+  | { type: "CHANGE_PASSWORD";  payload: { id: string; newPassword: string } }
+  | { type: "TOGGLE_USER";      payload: { id: string; active: boolean } }
+  | { type: "CREATE_EMPLOYEE";  payload: any }
+  | { type: "UPDATE_EMPLOYEE";  payload: any }
+  | { type: "TOGGLE_EMPLOYEE";  payload: { id: string; active: boolean } }
+  | { type: "CREATE_CUSTOMER";  payload: any }
+  | { type: "UPDATE_CUSTOMER";  payload: any }
+  | { type: "DELETE_CUSTOMER";  payload: { id: string } }
+  | { type: "CREATE_PART";      payload: any }
+  | { type: "UPDATE_PART";      payload: any }
+  | { type: "DELETE_PART";      payload: { id: string } }
+  | { type: "CREATE_SERVICE";   payload: any }
+  | { type: "UPDATE_SERVICE";   payload: any }
+  | { type: "CREATE_EXPENSE";   payload: any }
+  | { type: "UPDATE_EXPENSE";   payload: any }
+  | { type: "DELETE_EXPENSE";   payload: { id: string } }
+  | { type: "LOGIN";            payload: { email: string; password: string }; requestId: string }
+  | { type: "RECOVER_PASSWORD"; payload: { phone: string } }
+  | { type: "RESET_PASSWORD";   payload: { userId: string; newPassword: string } };
 
 async function startServer() {
+  // ── 1. Banco de Dados ──────────────────────────────────────────────────────
+  await testConnection();
+  await runMigrations();
+  await runSeed();
+
+  // ── 2. HTTP + WebSocket ────────────────────────────────────────────────────
   const app = express();
   const server = createServer(app);
   const wss = new WebSocketServer({ server });
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || "3000");
 
-  // Initial State
-  let state = {
-    users: [
-      { id: '1', name: 'Rubens', email: 'rubens@groficina.com', password: 'admin123', role: 'admin', employeeId: 'admin-1', phone: '(11) 99999-1111', active: true },
-      { id: '2', name: 'Marcela', email: 'marcela@groficina.com', password: 'recepcao123', role: 'receptionist', employeeId: 'recep-1', phone: '(11) 99999-2222', active: true },
-      { id: '3', name: 'Dusmenil', email: 'dusmenil@groficina.com', password: 'mecanico123', role: 'mechanic', employeeId: '1', phone: '(11) 99999-3333', active: true },
-      { id: '4', name: 'Erick', email: 'erick@groficina.com', password: 'mecanico123', role: 'mechanic', employeeId: '2', phone: '(11) 99999-4444', active: true },
-    ] as User[],
-    customers: [
-      { id: '1', name: 'João Silva', phone: '(11) 98888-7777', vehicle: 'Toyota Corolla', plate: 'ABC-1234' },
-      { id: '2', name: 'Maria Oliveira', phone: '(11) 97777-6666', vehicle: 'Honda Civic', plate: 'XYZ-9876' },
-    ] as Customer[],
-    employees: [
-      { id: 'admin-1', name: 'Rubens', baseSalary: 5000, commissionRate: 0, role: 'Administrador / Proprietário', phone: '(11) 99999-1111', active: true },
-      { id: 'recep-1', name: 'Marcela', baseSalary: 2500, commissionRate: 2, role: 'Recepcionista', phone: '(11) 99999-2222', active: true },
-      { id: '1', name: 'Dusmenil', baseSalary: 3500, commissionRate: 10, role: 'Mecânico Líder', phone: '(11) 99999-3333', active: true },
-      { id: '2', name: 'Erick', baseSalary: 2200, commissionRate: 5, role: 'Assistente', phone: '(11) 99999-4444', active: true },
-    ] as Employee[],
-    workshopInfo: {
-      name: 'GR OFICINA MECÂNICA',
-      cnpj: '00.000.000/0001-00',
-      address: 'Rua das Oficinas, 123 - Centro',
-      phone: '(11) 99999-8888',
-      email: 'contato@groficina.com'
-    } as WorkshopInfo,
-    parts: [
-      { id: '1', name: 'Pastilha de Freio', price: 150, stock: 20 },
-      { id: '2', name: 'Óleo 5W30', price: 45, stock: 50 },
-      { id: '3', name: 'Filtro de Ar', price: 80, stock: 15 },
-    ] as Part[],
-    services: [
-      { 
-        id: '1', 
-        entryDate: '2026-03-01T08:30:00Z', 
-        exitDate: '2026-03-01T17:45:00Z',
-        customerId: '1', 
-        employeeId: '1', 
-        serviceType: 'mechanical',
-        description: 'Troca de óleo e filtros', 
-        laborValue: 120, 
-        parts: [{ partId: '2', quantity: 4, priceAtTime: 45 }, { partId: '3', quantity: 1, priceAtTime: 80 }],
-        status: 'completed',
-        paymentMethod: 'card_credit',
-        installments: 3,
-        checklist: { fuelLevel: 50, mileage: 45000, scratches: 'Risco leve porta motorista', valuables: 'Nenhum' },
-        warrantyUntil: '2026-06-01T00:00:00Z'
-      },
-      { 
-        id: '2', 
-        entryDate: '2026-03-06T09:15:00Z', 
-        customerId: '2', 
-        employeeId: '2', 
-        serviceType: 'suspension',
-        description: 'Revisão de suspensão', 
-        laborValue: 350, 
-        parts: [{ partId: '1', quantity: 2, priceAtTime: 150 }],
-        status: 'in_progress',
-        checklist: { fuelLevel: 25, mileage: 82000, scratches: 'Amassado paralamas traseiro', valuables: 'Óculos de sol' }
-      },
-    ] as ServiceOrder[],
-    expenses: [
-      { id: '1', description: 'Aluguel Galpão', amount: 4500, dueDate: '2026-03-10', category: 'rent', isPaid: true },
-      { id: '2', description: 'Energia Elétrica', amount: 850, dueDate: '2026-03-15', category: 'utilities', isPaid: false },
-    ] as MonthlyExpense[],
-  };
+  app.use(express.json());
 
-  const broadcast = (data: any) => {
+  // ── 3. Broadcast para todos os clientes ───────────────────────────────────
+  const broadcast = (data: object, excludeWs?: WebSocket) => {
     const message = JSON.stringify(data);
     wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
+      if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
         client.send(message);
       }
     });
   };
 
-  wss.on("connection", (ws) => {
-    console.log("Client connected");
-    // Send initial state
-    ws.send(JSON.stringify({ type: "INIT", payload: state }));
+  const broadcastAll = (data: object) => broadcast(data);
 
-    ws.on("message", (message) => {
+  // ── 4. Helpers de resposta WebSocket ──────────────────────────────────────
+  const send = (ws: WebSocket, data: object) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
+  };
+
+  const sendError = (ws: WebSocket, requestId: string | undefined, message: string) => {
+    send(ws, { type: "ERROR", requestId, message });
+  };
+
+  // ── 5. WebSocket handler ──────────────────────────────────────────────────
+  wss.on("connection", async (ws) => {
+    console.log("[WS] Cliente conectado");
+
+    // Envia estado inicial completo para o cliente que acabou de conectar
+    try {
+      const state = await loadFullState();
+      send(ws, { type: "INIT", payload: state });
+    } catch (err) {
+      console.error("[WS] Erro ao carregar estado inicial:", err);
+      sendError(ws, undefined, "Erro ao carregar dados do servidor.");
+    }
+
+    ws.on("message", async (raw) => {
+      let msg: WsMessage & { requestId?: string };
       try {
-        const { type, payload } = JSON.parse(message.toString());
-        console.log(`Received event: ${type}`);
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return sendError(ws, undefined, "Mensagem inválida.");
+      }
 
+      const { type, requestId } = msg as any;
+      console.log(`[WS] Evento: ${type}`);
+
+      try {
         switch (type) {
-          case "UPDATE_USERS":
-            state.users = payload;
-            broadcast({ type: "USERS_UPDATED", payload: state.users });
+
+          // ── Estado completo ──────────────────────────────────────────────
+          case "GET_STATE": {
+            const state = await loadFullState();
+            send(ws, { type: "INIT", payload: state });
             break;
-          case "UPDATE_EMPLOYEES":
-            state.employees = payload;
-            broadcast({ type: "EMPLOYEES_UPDATED", payload: state.employees });
+          }
+
+          // ── Login ────────────────────────────────────────────────────────
+          case "LOGIN": {
+            const { email, password } = (msg as any).payload;
+            const user = await UserRepo.verifyPassword(email, password);
+            if (!user) {
+              send(ws, { type: "LOGIN_RESULT", requestId, success: false, message: "E-mail ou senha incorretos." });
+            } else if (!user.active) {
+              send(ws, { type: "LOGIN_RESULT", requestId, success: false, message: "Seu acesso foi bloqueado. Entre em contato com o administrador." });
+            } else {
+              send(ws, { type: "LOGIN_RESULT", requestId, success: true, user });
+            }
             break;
-          case "UPDATE_CUSTOMERS":
-            state.customers = payload;
-            broadcast({ type: "CUSTOMERS_UPDATED", payload: state.customers });
+          }
+
+          // ── Configurações ────────────────────────────────────────────────
+          case "UPDATE_WORKSHOP": {
+            const updated = await WorkshopRepo.update((msg as any).payload);
+            broadcastAll({ type: "WORKSHOP_UPDATED", payload: updated });
             break;
-          case "UPDATE_SERVICES":
-            state.services = payload;
-            broadcast({ type: "SERVICES_UPDATED", payload: state.services });
+          }
+
+          // ── Usuários ─────────────────────────────────────────────────────
+          case "CREATE_USER": {
+            const user = await UserRepo.create((msg as any).payload);
+            const users = await UserRepo.getAll();
+            broadcastAll({ type: "USERS_UPDATED", payload: users });
             break;
-          case "UPDATE_EXPENSES":
-            state.expenses = payload;
-            broadcast({ type: "EXPENSES_UPDATED", payload: state.expenses });
+          }
+
+          case "UPDATE_USER": {
+            const { id, ...data } = (msg as any).payload;
+            await UserRepo.update(id, data);
+            const users = await UserRepo.getAll();
+            broadcastAll({ type: "USERS_UPDATED", payload: users });
             break;
-          case "UPDATE_WORKSHOP":
-            state.workshopInfo = payload;
-            broadcast({ type: "WORKSHOP_UPDATED", payload: state.workshopInfo });
+          }
+
+          case "CHANGE_PASSWORD": {
+            const { id, newPassword } = (msg as any).payload;
+            await UserRepo.changePassword(id, newPassword);
+            send(ws, { type: "PASSWORD_CHANGED", requestId, success: true });
             break;
-          case "UPDATE_PARTS":
-            state.parts = payload;
-            broadcast({ type: "PARTS_UPDATED", payload: state.parts });
+          }
+
+          case "TOGGLE_USER": {
+            const { id, active } = (msg as any).payload;
+            await UserRepo.setActive(id, active);
+            const users = await UserRepo.getAll();
+            broadcastAll({ type: "USERS_UPDATED", payload: users });
             break;
+          }
+
+          // ── Funcionários ─────────────────────────────────────────────────
+          case "CREATE_EMPLOYEE": {
+            const emp = await EmployeeRepo.create((msg as any).payload);
+            const employees = await EmployeeRepo.getAll();
+            broadcastAll({ type: "EMPLOYEES_UPDATED", payload: employees });
+            break;
+          }
+
+          case "UPDATE_EMPLOYEE": {
+            const { id, ...data } = (msg as any).payload;
+            await EmployeeRepo.update(id, data);
+            const employees = await EmployeeRepo.getAll();
+            broadcastAll({ type: "EMPLOYEES_UPDATED", payload: employees });
+            break;
+          }
+
+          case "TOGGLE_EMPLOYEE": {
+            const { id, active } = (msg as any).payload;
+            await EmployeeRepo.setActive(id, active);
+            // Bloqueia/desbloqueia o usuário vinculado também
+            await UserRepo.setActive(id, active).catch(() => {});
+            const [employees, users] = await Promise.all([
+              EmployeeRepo.getAll(),
+              UserRepo.getAll(),
+            ]);
+            broadcastAll({ type: "EMPLOYEES_UPDATED", payload: employees });
+            broadcastAll({ type: "USERS_UPDATED", payload: users });
+            break;
+          }
+
+          // ── Clientes ─────────────────────────────────────────────────────
+          case "CREATE_CUSTOMER": {
+            const cust = await CustomerRepo.create((msg as any).payload);
+            const customers = await CustomerRepo.getAll();
+            broadcastAll({ type: "CUSTOMERS_UPDATED", payload: customers });
+            break;
+          }
+
+          case "UPDATE_CUSTOMER": {
+            const { id, ...data } = (msg as any).payload;
+            await CustomerRepo.update(id, data);
+            const customers = await CustomerRepo.getAll();
+            broadcastAll({ type: "CUSTOMERS_UPDATED", payload: customers });
+            break;
+          }
+
+          case "DELETE_CUSTOMER": {
+            await CustomerRepo.delete((msg as any).payload.id);
+            const customers = await CustomerRepo.getAll();
+            broadcastAll({ type: "CUSTOMERS_UPDATED", payload: customers });
+            break;
+          }
+
+          // ── Peças ─────────────────────────────────────────────────────────
+          case "CREATE_PART": {
+            await PartRepo.create((msg as any).payload);
+            const parts = await PartRepo.getAll();
+            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
+            break;
+          }
+
+          case "UPDATE_PART": {
+            const { id, ...data } = (msg as any).payload;
+            await PartRepo.update(id, data);
+            const parts = await PartRepo.getAll();
+            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
+            break;
+          }
+
+          case "DELETE_PART": {
+            await PartRepo.delete((msg as any).payload.id);
+            const parts = await PartRepo.getAll();
+            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
+            break;
+          }
+
+          // ── Ordens de Serviço ─────────────────────────────────────────────
+          case "CREATE_SERVICE": {
+            await ServiceOrderRepo.create((msg as any).payload);
+            const [services, parts] = await Promise.all([
+              ServiceOrderRepo.getAll(),
+              PartRepo.getAll(),
+            ]);
+            broadcastAll({ type: "SERVICES_UPDATED", payload: services });
+            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
+            break;
+          }
+
+          case "UPDATE_SERVICE": {
+            const { id, ...data } = (msg as any).payload;
+            await ServiceOrderRepo.update(id, data);
+            const [services, parts] = await Promise.all([
+              ServiceOrderRepo.getAll(),
+              PartRepo.getAll(),
+            ]);
+            broadcastAll({ type: "SERVICES_UPDATED", payload: services });
+            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
+            break;
+          }
+
+          // ── Despesas ──────────────────────────────────────────────────────
+          case "CREATE_EXPENSE": {
+            await ExpenseRepo.create((msg as any).payload);
+            const expenses = await ExpenseRepo.getAll();
+            broadcastAll({ type: "EXPENSES_UPDATED", payload: expenses });
+            break;
+          }
+
+          case "UPDATE_EXPENSE": {
+            const { id, ...data } = (msg as any).payload;
+            await ExpenseRepo.update(id, data);
+            const expenses = await ExpenseRepo.getAll();
+            broadcastAll({ type: "EXPENSES_UPDATED", payload: expenses });
+            break;
+          }
+
+          case "DELETE_EXPENSE": {
+            await ExpenseRepo.delete((msg as any).payload.id);
+            const expenses = await ExpenseRepo.getAll();
+            broadcastAll({ type: "EXPENSES_UPDATED", payload: expenses });
+            break;
+          }
+
           default:
-            console.warn(`Unknown event type: ${type}`);
+            console.warn(`[WS] Tipo de evento desconhecido: ${type}`);
         }
-      } catch (error) {
-        console.error("Error processing message:", error);
+      } catch (err: any) {
+        console.error(`[WS] Erro ao processar evento ${type}:`, err?.message || err);
+        sendError(ws, requestId, err?.message || "Erro interno do servidor.");
       }
     });
 
-    ws.on("close", () => {
-      console.log("Client disconnected");
-    });
+    ws.on("close", () => console.log("[WS] Cliente desconectado"));
+    ws.on("error", (err) => console.error("[WS] Erro no socket:", err));
   });
 
-  app.use(express.json());
-
-  // Vite middleware for development
+  // ── 6. Vite (dev) ou static (prod) ───────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -156,11 +312,15 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static("dist"));
+    app.get("*", (_req, res) => res.sendFile("dist/index.html", { root: "." }));
   }
 
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[Server] Rodando em http://localhost:${PORT}`);
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("[Server] Falha ao iniciar:", err);
+  process.exit(1);
+});
