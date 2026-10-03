@@ -1,9 +1,10 @@
 # sistema de gestão de oficina mecanica
-
+Correção e atualização de app criado pelo cliente no studioIA do google.
+- Em desenvolvimento
+- 
 ## Run Locally
 
 **Prerequisites:**  Node.js
-
 
 1. Install dependencies:
    `npm install`
@@ -21,5 +22,3 @@ BOOTSTRAP_ADMIN_PASSWORD=
 ```
 
 Preencha o e-mail e uma senha única com pelo menos 12 caracteres. O servidor cria apenas essa conta de administrador; não são mais criadas contas de demonstração com senhas conhecidas. Se as credenciais não estiverem configuradas, a inicialização do banco vazio falha com uma mensagem explicativa. Mantenha `.env.local` fora do controle de versão.
-
-Se o banco já foi inicializado por uma versão anterior, altere as senhas das contas existentes que usavam credenciais de demonstração antes de disponibilizar o sistema na rede.
