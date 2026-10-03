@@ -12,6 +12,12 @@ import {
 
 const SALT_ROUNDS = 12;
 
+function validatePassword(password: string): void {
+  if (typeof password !== 'string' || password.length < 12) {
+    throw new Error('A senha deve ter pelo menos 12 caracteres.');
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers de mapeamento (snake_case DB → camelCase App)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,6 +162,7 @@ export const UserRepo = {
   },
 
   async create(data: Omit<User, 'id'> & { id: string }): Promise<User> {
+    validatePassword(data.password);
     const hash = await bcrypt.hash(data.password, SALT_ROUNDS);
     const { rows } = await pool.query(
       `INSERT INTO users (id, name, email, password_hash, phone, role, employee_id, active)
@@ -167,6 +174,7 @@ export const UserRepo = {
   },
 
   async update(id: string, data: Partial<User> & { password?: string }): Promise<User> {
+    if (data.password) validatePassword(data.password);
     const existing = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
     if (!existing.rows.length) throw new Error(`Usuário ${id} não encontrado`);
 
@@ -212,6 +220,7 @@ export const UserRepo = {
   },
 
   async changePassword(id: string, newPassword: string): Promise<void> {
+    validatePassword(newPassword);
     const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await pool.query(
       'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',

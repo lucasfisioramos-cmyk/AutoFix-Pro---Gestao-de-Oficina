@@ -1,12 +1,4 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
-
-# Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/663c7e18-7672-4722-ae61-8eaffede07b2
+# sistema de gestão de oficina mecanica
 
 ## Run Locally
 
@@ -17,3 +9,17 @@ View your app in AI Studio: https://ai.studio/apps/663c7e18-7672-4722-ae61-8eaff
    `npm install`
 2. Run the app:
    `npm run dev`
+
+## Configuração inicial do administrador
+
+Antes de iniciar o sistema pela primeira vez com um banco vazio, defina estas variáveis no arquivo local `.env.local`:
+
+```env
+BOOTSTRAP_ADMIN_NAME=Administrador
+BOOTSTRAP_ADMIN_EMAIL=
+BOOTSTRAP_ADMIN_PASSWORD=
+```
+
+Preencha o e-mail e uma senha única com pelo menos 12 caracteres. O servidor cria apenas essa conta de administrador; não são mais criadas contas de demonstração com senhas conhecidas. Se as credenciais não estiverem configuradas, a inicialização do banco vazio falha com uma mensagem explicativa. Mantenha `.env.local` fora do controle de versão.
+
+Se o banco já foi inicializado por uma versão anterior, altere as senhas das contas existentes que usavam credenciais de demonstração antes de disponibilizar o sistema na rede.

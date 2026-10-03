@@ -106,7 +106,7 @@ export const EmployeeSection: React.FC<EmployeeSectionProps> = ({ employees, set
       id: userId,
       name: newEmployee.name,
       email: newEmployee.email || `${newEmployee.name.toLowerCase().replace(/\s+/g, '.')}@groficina.com`,
-      password: newEmployee.password || 'mecanico123',
+      password: newEmployee.password,
       phone: newEmployee.phone,
       role: newEmployee.userRole,
       employeeId: employeeId,
@@ -127,7 +127,7 @@ export const EmployeeSection: React.FC<EmployeeSectionProps> = ({ employees, set
       password: ''
     });
     setIsModalOpen(false);
-    alert(`Acesso criado!\nEmail: ${userData.email}\nSenha: ${userData.password}`);
+    alert(`Acesso criado!\nEmail: ${userData.email}`);
   };
 
   return (
@@ -458,10 +458,11 @@ export const EmployeeSection: React.FC<EmployeeSectionProps> = ({ employees, set
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Senha de Acesso</label>
                     <input
                       required
-                      type="text"
+                      type="password"
+                      minLength={12}
                       value={newEmployee.password}
                       onChange={e => setNewEmployee(prev => ({ ...prev, password: e.target.value }))}
-                      placeholder="Mínimo 6 caracteres"
+                      placeholder="Mínimo 12 caracteres"
                       className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>

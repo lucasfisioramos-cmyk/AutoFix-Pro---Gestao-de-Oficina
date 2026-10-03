@@ -19,6 +19,16 @@ export async function runSeed(): Promise<void> {
 
     await client.query('BEGIN');
 
+    const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim();
+    const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+    const adminName = process.env.BOOTSTRAP_ADMIN_NAME?.trim() || 'Administrador';
+    if (!adminEmail || !adminPassword || adminPassword.length < 12) {
+      throw new Error(
+        '[DB] Para inicializar um banco vazio, configure BOOTSTRAP_ADMIN_EMAIL e ' +
+        'uma BOOTSTRAP_ADMIN_PASSWORD com pelo menos 12 caracteres no .env.local.'
+      );
+    }
+
     // ── Configurações da Oficina ────────────────────────────────────────────
     await client.query(`
       UPDATE workshop_info SET
@@ -33,27 +43,21 @@ export async function runSeed(): Promise<void> {
     // ── Funcionários ────────────────────────────────────────────────────────
     await client.query(`
       INSERT INTO employees (id, name, base_salary, commission_rate, role, phone, active) VALUES
-        ('admin-1', 'Rubens',   5000, 0,  'Administrador / Proprietário', '(11) 99999-1111', true),
+        ('admin-1', $1,         5000, 0,  'Administrador / Proprietário', '', true),
         ('recep-1', 'Marcela',  2500, 2,  'Recepcionista',                '(11) 99999-2222', true),
         ('mec-1',   'Dusmenil', 3500, 10, 'Mecânico Líder',               '(11) 99999-3333', true),
         ('mec-2',   'Erick',    2200, 5,  'Assistente',                   '(11) 99999-4444', true)
       ON CONFLICT (id) DO NOTHING
-    `);
+    `, [adminName]);
 
-    // ── Usuários (senhas com hash bcrypt) ────────────────────────────────────
-    const adminHash  = await bcrypt.hash('admin123',    SALT_ROUNDS);
-    const recepHash  = await bcrypt.hash('recepcao123', SALT_ROUNDS);
-    const mec1Hash   = await bcrypt.hash('mecanico123', SALT_ROUNDS);
-    const mec2Hash   = await bcrypt.hash('mecanico123', SALT_ROUNDS);
+    // ── Administrador inicial com credenciais configuradas localmente ───────
+    const adminHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
 
     await client.query(`
       INSERT INTO users (id, name, email, password_hash, phone, role, employee_id, active) VALUES
-        ('usr-1', 'Rubens',   'rubens@groficina.com',   $1, '(11) 99999-1111', 'admin',        'admin-1', true),
-        ('usr-2', 'Marcela',  'marcela@groficina.com',  $2, '(11) 99999-2222', 'receptionist', 'recep-1', true),
-        ('usr-3', 'Dusmenil', 'dusmenil@groficina.com', $3, '(11) 99999-3333', 'mechanic',     'mec-1',   true),
-        ('usr-4', 'Erick',    'erick@groficina.com',    $4, '(11) 99999-4444', 'mechanic',     'mec-2',   true)
+        ('usr-1', $1, $2, $3, '', 'admin', 'admin-1', true)
       ON CONFLICT (id) DO NOTHING
-    `, [adminHash, recepHash, mec1Hash, mec2Hash]);
+    `, [adminName, adminEmail, adminHash]);
 
     // ── Clientes de exemplo ──────────────────────────────────────────────────
     await client.query(`

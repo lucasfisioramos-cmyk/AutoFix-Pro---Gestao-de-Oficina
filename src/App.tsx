@@ -20,7 +20,6 @@ import {
   Mail,
   ArrowLeft,
   AlertCircle,
-  Phone,
   Banknote,
   Receipt,
   Loader2
@@ -144,12 +143,6 @@ export default function App() {
 
   // Recovery
   const [isRecovering, setIsRecovering] = useState(false);
-  const [recoveryStep, setRecoveryStep] = useState<'phone' | 'code' | 'newPassword'>('phone');
-  const [recoveryPhone, setRecoveryPhone] = useState('');
-  const [recoveryCode, setRecoveryCode] = useState('');
-  const [sentCode, setSentCode] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [recoveryUserId, setRecoveryUserId] = useState<string | null>(null);
 
   // State
   const [users, setUsers] = useState<User[]>([]);
@@ -165,6 +158,7 @@ export default function App() {
   // Registra listeners de broadcast do servidor
   useEffect(() => {
     const offs = [
+      on('READY', () => setInitialLoading(false)),
       on('INIT', (payload) => {
         setWorkshopInfo(payload.workshopInfo);
         setUsers(payload.users);
@@ -204,47 +198,6 @@ export default function App() {
       setLoginError('Erro de conexão. Tente novamente.');
     } finally {
       setLoginLoading(false);
-    }
-  };
-
-  // ── Recuperação de Senha ──────────────────────────────────────────────────
-  const handleStartRecovery = (e: React.FormEvent) => {
-    e.preventDefault();
-    const user = users.find(u => u.phone === recoveryPhone);
-    if (user) {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      setSentCode(code);
-      setRecoveryUserId(user.id);
-      setRecoveryStep('code');
-      alert(`[SIMULAÇÃO SMS] Código enviado para ${recoveryPhone}: ${code}`);
-    } else {
-      alert('Telefone não encontrado em nossa base de funcionários.');
-    }
-  };
-
-  const handleVerifyCode = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (recoveryCode === sentCode) {
-      setRecoveryStep('newPassword');
-    } else {
-      alert('Código incorreto. Tente novamente.');
-    }
-  };
-
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!recoveryUserId) return;
-    try {
-      await request('CHANGE_PASSWORD', { id: recoveryUserId, newPassword });
-      alert('Senha alterada com sucesso! Agora você pode fazer login.');
-      setIsRecovering(false);
-      setRecoveryStep('phone');
-      setRecoveryPhone('');
-      setRecoveryCode('');
-      setNewPassword('');
-      setRecoveryUserId(null);
-    } catch (err: any) {
-      alert(`Erro ao alterar senha: ${err.message}`);
     }
   };
 
@@ -455,52 +408,16 @@ export default function App() {
               <div className="space-y-6">
                 <div className="flex items-center gap-2 mb-2">
                   <button 
-                    onClick={() => { setIsRecovering(false); setRecoveryStep('phone'); }}
+                    onClick={() => setIsRecovering(false)}
                     className="p-2 hover:bg-slate-100 rounded-lg transition-all"
                   >
                     <ArrowLeft className="w-4 h-4 text-slate-600" />
                   </button>
                   <h2 className="text-xl font-bold text-slate-900">Recuperar Senha</h2>
                 </div>
-
-                {recoveryStep === 'phone' && (
-                  <form onSubmit={handleStartRecovery} className="space-y-4">
-                    <p className="text-sm text-slate-500">Informe seu número de celular cadastrado.</p>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Celular</label>
-                      <div className="relative">
-                        <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <input required type="text" placeholder="(00) 00000-0000" value={recoveryPhone}
-                          onChange={e => setRecoveryPhone(e.target.value)}
-                          className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 transition-all" />
-                      </div>
-                    </div>
-                    <button type="submit" className="w-full py-4 bg-brand-600 text-white font-bold rounded-xl shadow-lg shadow-brand-200 hover:bg-brand-700 transition-all">Enviar Código</button>
-                  </form>
-                )}
-
-                {recoveryStep === 'code' && (
-                  <form onSubmit={handleVerifyCode} className="space-y-4">
-                    <p className="text-sm text-slate-500">Digite o código de 6 dígitos.</p>
-                    <input required type="text" maxLength={6} placeholder="000000" value={recoveryCode}
-                      onChange={e => setRecoveryCode(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 transition-all text-center text-2xl tracking-[0.5em] font-bold" />
-                    <button type="submit" className="w-full py-4 bg-brand-600 text-white font-bold rounded-xl shadow-lg shadow-brand-200 hover:bg-brand-700 transition-all">Verificar</button>
-                  </form>
-                )}
-
-                {recoveryStep === 'newPassword' && (
-                  <form onSubmit={handleResetPassword} className="space-y-4">
-                    <p className="text-sm text-slate-500">Crie uma nova senha segura.</p>
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                      <input required type="password" placeholder="••••••••" value={newPassword}
-                        onChange={e => setNewPassword(e.target.value)}
-                        className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 transition-all" />
-                    </div>
-                    <button type="submit" className="w-full py-4 bg-brand-600 text-white font-bold rounded-xl shadow-lg shadow-brand-200 hover:bg-brand-700 transition-all">Alterar Senha</button>
-                  </form>
-                )}
+                <p className="text-sm text-slate-500">
+                  A recuperação automática não está configurada. Entre em contato com o administrador do sistema para redefinir sua senha.
+                </p>
               </div>
             ) : (
               <form onSubmit={handleLogin} className="space-y-6">
@@ -628,7 +545,6 @@ export default function App() {
                         <Pie
                           data={[
                             { name: 'Mecânica',  value: services.filter(s => s.serviceType === 'mechanical').length },
-                            { name: 'Elétrica',  value: services.filter(s => s.serviceType === 'electrical').length },
                             { name: 'Suspensão', value: services.filter(s => s.serviceType === 'suspension').length },
                             { name: 'Freios',    value: services.filter(s => s.serviceType === 'brakes').length },
                             { name: 'Outros',    value: services.filter(s => s.serviceType === 'other').length },
@@ -666,7 +582,7 @@ export default function App() {
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-bold text-slate-900">{customer?.vehicle}</p>
                             <span className="text-[10px] font-bold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded uppercase">
-                              {s.serviceType === 'mechanical' ? 'Mecânica' : s.serviceType === 'electrical' ? 'Elétrica' : s.serviceType === 'suspension' ? 'Suspensão' : s.serviceType === 'brakes' ? 'Freios' : s.serviceType === 'engine' ? 'Motor' : 'Outros'}
+                              {s.serviceType === 'mechanical' ? 'Mecânica' : s.serviceType === 'suspension' ? 'Suspensão' : s.serviceType === 'brakes' ? 'Freios' : s.serviceType === 'engine' ? 'Motor' : 'Outros'}
                             </span>
                           </div>
                           <p className="text-xs text-slate-500">{customer?.name} • {customer?.plate}</p>
@@ -707,7 +623,7 @@ export default function App() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-sm">
-                            {s.serviceType === 'mechanical' ? 'Mecânica' : s.serviceType === 'electrical' ? 'Elétrica' : s.serviceType === 'suspension' ? 'Suspensão' : s.serviceType === 'brakes' ? 'Freios' : s.serviceType === 'engine' ? 'Motor' : 'Outros'}
+                            {s.serviceType === 'mechanical' ? 'Mecânica' : s.serviceType === 'suspension' ? 'Suspensão' : s.serviceType === 'brakes' ? 'Freios' : s.serviceType === 'engine' ? 'Motor' : 'Outros'}
                           </td>
                           <td className="px-4 py-3 text-sm">
                             <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase",
@@ -769,7 +685,18 @@ export default function App() {
               Reconectando...
             </div>
           )}
-          <button onClick={() => setIsAuthenticated(false)}
+          <button onClick={() => {
+            send('LOGOUT');
+            setIsAuthenticated(false);
+            setCurrentUser(null);
+            setLoginData({ email: '', password: '' });
+            setUsers([]);
+            setCustomers([]);
+            setEmployees([]);
+            setParts([]);
+            setServices([]);
+            setExpenses([]);
+          }}
             className="flex items-center gap-3 px-4 py-3 text-slate-500 hover:text-rose-600 font-medium transition-all w-full">
             <LogOut className="w-5 h-5" /> Sair
           </button>

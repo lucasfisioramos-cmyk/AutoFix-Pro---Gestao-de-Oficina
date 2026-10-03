@@ -48,7 +48,7 @@ export interface User {
 }
 
 export type PaymentMethod = 'cash' | 'card_debit' | 'card_credit' | 'pix';
-export type ServiceType = 'mechanical' | 'electrical' | 'suspension' | 'brakes' | 'engine' | 'other';
+export type ServiceType = 'mechanical' | 'suspension' | 'brakes' | 'engine' | 'other';
 
 export interface Checklist {
   fuelLevel: number; // 0-100
