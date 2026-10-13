@@ -26,13 +26,6 @@ export interface Employee {
   active: boolean;
 }
 
-export interface Part {
-  id: string;
-  name: string;
-  price: number;
-  stock: number;
-}
-
 export type UserRole = 'admin' | 'receptionist' | 'mechanic';
 
 export interface User {
@@ -48,7 +41,7 @@ export interface User {
 }
 
 export type PaymentMethod = 'cash' | 'card_debit' | 'card_credit' | 'pix';
-export type ServiceType = 'mechanical' | 'suspension' | 'brakes' | 'engine' | 'other';
+export type ServiceType = 'mechanical' | 'electrical' | 'suspension' | 'brakes' | 'engine' | 'other';
 
 export interface Checklist {
   fuelLevel: number; // 0-100
@@ -67,13 +60,31 @@ export interface ServiceOrder {
   description: string;
   notes?: string;
   laborValue: number;
-  parts: { partId: string; quantity: number; priceAtTime: number }[];
+  partsDescription: string;
+  partsValue: number;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   paymentMethod?: PaymentMethod;
   installments?: number;
   checklist?: Checklist;
   warrantyUntil?: string; // ISO string
   images?: string[]; // URLs
+}
+
+export interface Quote {
+  id: string;
+  customerId: string;
+  serviceType: ServiceType;
+  requiredParts: { name: string; price: number }[];
+  laborValue: number;
+  partsValue: number;
+  estimatedDuration: string;
+  vehicleName: string;
+  vehicleMake: string;
+  vehicleYear: string;
+  vehicleModel: string;
+  vehicleEngine: string;
+  createdByUserId: string;
+  createdAt: string;
 }
 
 export interface MonthlyExpense {
@@ -96,7 +107,6 @@ export interface WorkshopInfo {
 
 export const CATEGORIES: Category[] = [
   { id: 'service', name: 'Serviços', color: '#10b981', icon: 'Wrench' },
-  { id: 'parts_sale', name: 'Venda de Peças', color: '#3b82f6', icon: 'Package' },
   { id: 'rent', name: 'Aluguel', color: '#f59e0b', icon: 'Home' },
   { id: 'salary', name: 'Salários', color: '#ef4444', icon: 'Users' },
   { id: 'utilities', name: 'Contas Fixas', color: '#8b5cf6', icon: 'Zap' },

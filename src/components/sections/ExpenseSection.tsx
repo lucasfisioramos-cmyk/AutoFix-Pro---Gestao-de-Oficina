@@ -148,7 +148,7 @@ export const ExpenseSection: React.FC<ExpenseSectionProps> = ({ expenses, setExp
                     onChange={e => setNewExpense(prev => ({ ...prev, category: e.target.value }))}
                     className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500"
                   >
-                    {CATEGORIES.filter(c => !['service', 'parts_sale', 'salary'].includes(c.id)).map(c => (
+                    {CATEGORIES.filter(c => !['service', 'salary'].includes(c.id)).map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>

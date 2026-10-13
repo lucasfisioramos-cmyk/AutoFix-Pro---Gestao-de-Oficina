@@ -16,9 +16,9 @@ import {
   UserRepo,
   EmployeeRepo,
   CustomerRepo,
-  PartRepo,
   ServiceOrderRepo,
   ExpenseRepo,
+  QuoteRepo,
 } from "./src/db/repository";
 
 // ─── Tipos auxiliares ────────────────────────────────────────────────────────
@@ -36,14 +36,14 @@ type WsMessage =
   | { type: "CREATE_CUSTOMER";  payload: any }
   | { type: "UPDATE_CUSTOMER";  payload: any }
   | { type: "DELETE_CUSTOMER";  payload: { id: string } }
-  | { type: "CREATE_PART";      payload: any }
-  | { type: "UPDATE_PART";      payload: any }
-  | { type: "DELETE_PART";      payload: { id: string } }
   | { type: "CREATE_SERVICE";   payload: any }
   | { type: "UPDATE_SERVICE";   payload: any }
   | { type: "CREATE_EXPENSE";   payload: any }
   | { type: "UPDATE_EXPENSE";   payload: any }
   | { type: "DELETE_EXPENSE"; payload: { id: string } }
+  | { type: "CREATE_QUOTE";      payload: any }
+  | { type: "UPDATE_QUOTE";      payload: any }
+  | { type: "DELETE_QUOTE";      payload: { id: string } }
   | { type: "LOGIN";            payload: { email: string; password: string }; requestId: string };
 
 async function startServer() {
@@ -105,6 +105,8 @@ async function startServer() {
         return user.role === "mechanic" ? null : data;
       case "EXPENSES_UPDATED":
         return null;
+      case "QUOTES_UPDATED":
+        return user.role === "mechanic" ? null : data;
       default:
         return data;
     }
@@ -138,6 +140,7 @@ async function startServer() {
           ))
         : state.customers,
       expenses: [],
+      quotes: [],
     };
   };
 
@@ -314,42 +317,12 @@ async function startServer() {
             break;
           }
 
-          // ── Peças ─────────────────────────────────────────────────────────
-          case "CREATE_PART": {
-            requireRole(ws, ["admin", "receptionist"]);
-            await PartRepo.create((msg as any).payload);
-            const parts = await PartRepo.getAll();
-            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
-            break;
-          }
-
-          case "UPDATE_PART": {
-            requireRole(ws, ["admin", "receptionist"]);
-            const { id, ...data } = (msg as any).payload;
-            await PartRepo.update(id, data);
-            const parts = await PartRepo.getAll();
-            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
-            break;
-          }
-
-          case "DELETE_PART": {
-            requireRole(ws, ["admin", "receptionist"]);
-            await PartRepo.delete((msg as any).payload.id);
-            const parts = await PartRepo.getAll();
-            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
-            break;
-          }
-
           // ── Ordens de Serviço ─────────────────────────────────────────────
           case "CREATE_SERVICE": {
             requireRole(ws, ["admin", "receptionist"]);
             await ServiceOrderRepo.create((msg as any).payload);
-            const [services, parts] = await Promise.all([
-              ServiceOrderRepo.getAll(),
-              PartRepo.getAll(),
-            ]);
+            const services = await ServiceOrderRepo.getAll();
             broadcastAll({ type: "SERVICES_UPDATED", payload: services });
-            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
             break;
           }
 
@@ -366,12 +339,8 @@ async function startServer() {
               }
             }
             await ServiceOrderRepo.update(id, data);
-            const [services, parts] = await Promise.all([
-              ServiceOrderRepo.getAll(),
-              PartRepo.getAll(),
-            ]);
+            const services = await ServiceOrderRepo.getAll();
             broadcastAll({ type: "SERVICES_UPDATED", payload: services });
-            broadcastAll({ type: "PARTS_UPDATED", payload: parts });
             break;
           }
 
@@ -398,6 +367,32 @@ async function startServer() {
             await ExpenseRepo.delete((msg as any).payload.id);
             const expenses = await ExpenseRepo.getAll();
             broadcastAll({ type: "EXPENSES_UPDATED", payload: expenses });
+            break;
+          }
+
+          // ── Orçamentos ────────────────────────────────────────────────────
+          case "CREATE_QUOTE": {
+            const user = requireRole(ws, ["admin", "receptionist"]);
+            await QuoteRepo.create({ ...(msg as any).payload, createdByUserId: user.id });
+            const quotes = await QuoteRepo.getAll();
+            broadcastAll({ type: "QUOTES_UPDATED", payload: quotes });
+            break;
+          }
+
+          case "UPDATE_QUOTE": {
+            requireRole(ws, ["admin", "receptionist"]);
+            const { id, ...data } = (msg as any).payload;
+            await QuoteRepo.update(id, data);
+            const quotes = await QuoteRepo.getAll();
+            broadcastAll({ type: "QUOTES_UPDATED", payload: quotes });
+            break;
+          }
+
+          case "DELETE_QUOTE": {
+            requireRole(ws, ["admin", "receptionist"]);
+            await QuoteRepo.delete((msg as any).payload.id);
+            const quotes = await QuoteRepo.getAll();
+            broadcastAll({ type: "QUOTES_UPDATED", payload: quotes });
             break;
           }
 

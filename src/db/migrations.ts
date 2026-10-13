@@ -8,7 +8,6 @@ export async function runMigrations(): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
     // ── Configurações da Oficina ────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS workshop_info (
@@ -21,13 +20,11 @@ export async function runMigrations(): Promise<void> {
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-
     // Garante que sempre exista exatamente uma linha
     await client.query(`
       INSERT INTO workshop_info (id) VALUES (1)
       ON CONFLICT (id) DO NOTHING;
     `);
-
     // ── Funcionários ────────────────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS employees (
@@ -42,7 +39,6 @@ export async function runMigrations(): Promise<void> {
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-
     // ── Usuários do sistema ─────────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -60,7 +56,6 @@ export async function runMigrations(): Promise<void> {
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-
     // ── Clientes ────────────────────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS customers (
@@ -74,19 +69,6 @@ export async function runMigrations(): Promise<void> {
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-
-    // ── Peças / Estoque ─────────────────────────────────────────────────────
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS parts (
-        id          TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        price       NUMERIC(12,2) NOT NULL DEFAULT 0,
-        stock       INTEGER NOT NULL DEFAULT 0,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-    `);
-
     // ── Ordens de Serviço ───────────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS service_orders (
@@ -114,15 +96,66 @@ export async function runMigrations(): Promise<void> {
       );
     `);
 
-    // ── Peças usadas por O.S. ───────────────────────────────────────────────
+    // Preserve legacy service-order part totals without retaining stock links.
     await client.query(`
-      CREATE TABLE IF NOT EXISTS service_order_parts (
-        id              SERIAL PRIMARY KEY,
-        service_order_id TEXT NOT NULL REFERENCES service_orders(id) ON DELETE CASCADE,
-        part_id         TEXT NOT NULL REFERENCES parts(id) ON DELETE RESTRICT,
-        quantity        INTEGER NOT NULL DEFAULT 1,
-        price_at_time   NUMERIC(12,2) NOT NULL DEFAULT 0
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'service_orders'
+            AND column_name = 'parts_value'
+        ) THEN
+          ALTER TABLE service_orders
+            ADD COLUMN parts_description TEXT NOT NULL DEFAULT '',
+            ADD COLUMN parts_value NUMERIC(12,2) NOT NULL DEFAULT 0;
+
+          IF to_regclass('service_order_parts') IS NOT NULL THEN
+            UPDATE service_orders AS service
+            SET parts_value = legacy.total
+            FROM (
+              SELECT service_order_id, SUM(quantity * price_at_time) AS total
+              FROM service_order_parts
+              GROUP BY service_order_id
+            ) AS legacy
+            WHERE service.id = legacy.service_order_id;
+          END IF;
+        ELSE
+          ALTER TABLE service_orders
+            ADD COLUMN IF NOT EXISTS parts_description TEXT NOT NULL DEFAULT '';
+        END IF;
+      END $$;
+    `);
+
+    // ── Orçamentos ─────────────────────────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quotes (
+        id                  TEXT PRIMARY KEY,
+        customer_id         TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+        service_type        TEXT NOT NULL DEFAULT 'mechanical'
+                              CHECK (service_type IN ('mechanical','electrical','suspension','brakes','engine','other')),
+        required_parts      TEXT NOT NULL DEFAULT '',
+        labor_value         NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (labor_value >= 0),
+        parts_value         NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (parts_value >= 0),
+        estimated_duration  TEXT NOT NULL,
+        vehicle_name        TEXT NOT NULL,
+        vehicle_make        TEXT NOT NULL DEFAULT '',
+        vehicle_year        TEXT NOT NULL DEFAULT '',
+        vehicle_model       TEXT NOT NULL DEFAULT '',
+        vehicle_engine      TEXT NOT NULL DEFAULT '',
+        created_by_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+    `);
+    await client.query(`
+      ALTER TABLE quotes ADD COLUMN IF NOT EXISTS parts_items JSONB NOT NULL DEFAULT '[]';
+      UPDATE quotes
+      SET parts_items = jsonb_build_array(jsonb_build_object(
+        'name', required_parts,
+        'price', parts_value
+      ))
+      WHERE parts_items = '[]'::jsonb AND required_parts <> '';
     `);
 
     // ── Despesas Mensais ────────────────────────────────────────────────────
@@ -146,9 +179,10 @@ export async function runMigrations(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_service_orders_employee  ON service_orders(employee_id);
       CREATE INDEX IF NOT EXISTS idx_service_orders_status    ON service_orders(status);
       CREATE INDEX IF NOT EXISTS idx_service_orders_entry     ON service_orders(entry_date DESC);
-      CREATE INDEX IF NOT EXISTS idx_sop_service_order        ON service_order_parts(service_order_id);
       CREATE INDEX IF NOT EXISTS idx_customers_plate          ON customers(plate);
       CREATE INDEX IF NOT EXISTS idx_users_email              ON users(email);
+      CREATE INDEX IF NOT EXISTS idx_quotes_customer         ON quotes(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_quotes_created           ON quotes(created_at DESC);
     `);
 
     await client.query('COMMIT');

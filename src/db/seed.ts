@@ -67,45 +67,27 @@ export async function runSeed(): Promise<void> {
       ON CONFLICT (id) DO NOTHING
     `);
 
-    // ── Peças de exemplo ─────────────────────────────────────────────────────
-    await client.query(`
-      INSERT INTO parts (id, name, price, stock) VALUES
-        ('part-1', 'Pastilha de Freio', 150.00, 20),
-        ('part-2', 'Óleo 5W30',          45.00, 50),
-        ('part-3', 'Filtro de Ar',        80.00, 15)
-      ON CONFLICT (id) DO NOTHING
-    `);
-
     // ── Ordens de Serviço de exemplo ────────────────────────────────────────
     await client.query(`
       INSERT INTO service_orders
         (id, entry_date, exit_date, customer_id, employee_id, service_type,
-         description, labor_value, status, payment_method, installments,
+         description, labor_value, parts_value, status, payment_method, installments,
          warranty_until, checklist, images)
       VALUES
         ('os-1',
          '2026-03-01T08:30:00Z', '2026-03-01T17:45:00Z',
          'cust-1', 'mec-1', 'mechanical',
-         'Troca de óleo e filtros', 120.00, 'completed', 'card_credit', 3,
+         'Troca de óleo e filtros', 120.00, 260.00, 'completed', 'card_credit', 3,
          '2026-06-01T00:00:00Z',
          '{"fuelLevel":50,"mileage":45000,"scratches":"Risco leve porta motorista","valuables":"Nenhum"}',
          '[]'),
         ('os-2',
          '2026-03-06T09:15:00Z', NULL,
          'cust-2', 'mec-2', 'suspension',
-         'Revisão de suspensão', 350.00, 'in_progress', NULL, NULL, NULL,
+         'Revisão de suspensão', 350.00, 300.00, 'in_progress', NULL, NULL, NULL,
          '{"fuelLevel":25,"mileage":82000,"scratches":"Amassado paralamas traseiro","valuables":"Óculos de sol"}',
          '[]')
       ON CONFLICT (id) DO NOTHING
-    `);
-
-    // Peças das OSs
-    await client.query(`
-      INSERT INTO service_order_parts (service_order_id, part_id, quantity, price_at_time) VALUES
-        ('os-1', 'part-2', 4, 45.00),
-        ('os-1', 'part-3', 1, 80.00),
-        ('os-2', 'part-1', 2, 150.00)
-      ON CONFLICT DO NOTHING
     `);
 
     // ── Despesas de exemplo ──────────────────────────────────────────────────

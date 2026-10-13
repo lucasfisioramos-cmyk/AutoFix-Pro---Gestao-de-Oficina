@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import {
   Customer,
   Employee,
-  Part,
+  Quote,
   ServiceOrder,
   MonthlyExpense,
   User,
@@ -59,23 +59,7 @@ function rowToCustomer(row: any): Customer {
   };
 }
 
-function rowToPart(row: any): Part {
-  return {
-    id:    row.id,
-    name:  row.name,
-    price: parseFloat(row.price),
-    stock: parseInt(row.stock),
-  };
-}
-
 function rowToServiceOrder(row: any): ServiceOrder {
-  // As partes vêm como JSON agregado via query
-  const parts = (row.parts_json || []).map((p: any) => ({
-    partId:      p.part_id,
-    quantity:    parseInt(p.quantity),
-    priceAtTime: parseFloat(p.price_at_time),
-  }));
-
   return {
     id:            row.id,
     entryDate:     new Date(row.entry_date).toISOString(),
@@ -86,13 +70,14 @@ function rowToServiceOrder(row: any): ServiceOrder {
     description:   row.description,
     notes:         row.notes || undefined,
     laborValue:    parseFloat(row.labor_value),
+    partsDescription: row.parts_description || '',
+    partsValue:    parseFloat(row.parts_value || '0'),
     status:        row.status,
     paymentMethod: row.payment_method || undefined,
     installments:  row.installments ? parseInt(row.installments) : undefined,
     warrantyUntil: row.warranty_until ? new Date(row.warranty_until).toISOString() : undefined,
     checklist:     row.checklist || undefined,
     images:        row.images || [],
-    parts,
   };
 }
 
@@ -111,6 +96,31 @@ function rowToExpense(row: any): MonthlyExpense {
                    : undefined,
     category:    row.category,
     isPaid:      row.is_paid,
+  };
+}
+
+function rowToQuote(row: any): Quote {
+  const parts = Array.isArray(row.parts_items)
+    ? row.parts_items
+    : row.required_parts
+      ? [{ name: row.required_parts, price: parseFloat(row.parts_value) || 0 }]
+      : [];
+
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    serviceType: row.service_type,
+    requiredParts: parts.map((part: any) => ({ name: part.name, price: Number(part.price) })),
+    laborValue: parseFloat(row.labor_value),
+    partsValue: parseFloat(row.parts_value),
+    estimatedDuration: row.estimated_duration,
+    vehicleName: row.vehicle_name,
+    vehicleMake: row.vehicle_make,
+    vehicleYear: row.vehicle_year,
+    vehicleModel: row.vehicle_model,
+    vehicleEngine: row.vehicle_engine,
+    createdByUserId: row.created_by_user_id,
+    createdAt: new Date(row.created_at).toISOString(),
   };
 }
 
@@ -346,244 +356,94 @@ export const CustomerRepo = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Parts
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const PartRepo = {
-  async getAll(): Promise<Part[]> {
-    const { rows } = await pool.query('SELECT * FROM parts ORDER BY name');
-    return rows.map(rowToPart);
-  },
-
-  async create(data: Part): Promise<Part> {
-    const { rows } = await pool.query(
-      `INSERT INTO parts (id, name, price, stock) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [data.id, data.name, data.price, data.stock]
-    );
-    return rowToPart(rows[0]);
-  },
-
-  async update(id: string, data: Partial<Part>): Promise<Part> {
-    const existing = await pool.query('SELECT * FROM parts WHERE id = $1', [id]);
-    if (!existing.rows.length) throw new Error(`Peça ${id} não encontrada`);
-    const r = existing.rows[0];
-
-    const { rows } = await pool.query(
-      `UPDATE parts SET name = $1, price = $2, stock = $3, updated_at = NOW()
-       WHERE id = $4 RETURNING *`,
-      [
-        data.name  ?? r.name,
-        data.price ?? r.price,
-        data.stock ?? r.stock,
-        id,
-      ]
-    );
-    return rowToPart(rows[0]);
-  },
-
-  async delete(id: string): Promise<void> {
-    await pool.query('DELETE FROM parts WHERE id = $1', [id]);
-  },
-
-  /** Desconta estoque das peças usadas em uma O.S. dentro de uma transação */
-  async decrementStock(
-    client: import('pg').PoolClient,
-    items: { partId: string; quantity: number }[]
-  ): Promise<void> {
-    for (const item of items) {
-      const result = await client.query(
-        `UPDATE parts SET stock = stock - $1, updated_at = NOW()
-         WHERE id = $2 AND stock >= $1
-         RETURNING id, stock`,
-        [item.quantity, item.partId]
-      );
-      if (!result.rows.length) {
-        throw new Error(`Estoque insuficiente para a peça ${item.partId}`);
-      }
-    }
-  },
-
-  /** Devolve estoque ao cancelar/editar uma O.S. */
-  async incrementStock(
-    client: import('pg').PoolClient,
-    items: { partId: string; quantity: number }[]
-  ): Promise<void> {
-    for (const item of items) {
-      await client.query(
-        `UPDATE parts SET stock = stock + $1, updated_at = NOW() WHERE id = $2`,
-        [item.quantity, item.partId]
-      );
-    }
-  },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Service Orders
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Query base que traz a OS junto com suas peças em JSON */
-const SERVICE_ORDER_SELECT = `
-  SELECT
-    so.*,
-    COALESCE(
-      json_agg(
-        json_build_object(
-          'part_id',      sop.part_id,
-          'quantity',     sop.quantity,
-          'price_at_time', sop.price_at_time
-        )
-      ) FILTER (WHERE sop.id IS NOT NULL),
-      '[]'
-    ) AS parts_json
-  FROM service_orders so
-  LEFT JOIN service_order_parts sop ON sop.service_order_id = so.id
-`;
 
 export const ServiceOrderRepo = {
   async getAll(): Promise<ServiceOrder[]> {
     const { rows } = await pool.query(
-      `${SERVICE_ORDER_SELECT}
-       GROUP BY so.id
-       ORDER BY so.entry_date DESC`
+      'SELECT * FROM service_orders ORDER BY entry_date DESC'
     );
     return rows.map(rowToServiceOrder);
   },
 
   async create(data: ServiceOrder): Promise<ServiceOrder> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      await client.query(
-        `INSERT INTO service_orders
-           (id, entry_date, exit_date, customer_id, employee_id, service_type,
-            description, notes, labor_value, status, payment_method, installments,
-            warranty_until, checklist, images)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-        [
-          data.id,
-          data.entryDate,
-          data.exitDate   || null,
-          data.customerId,
-          data.employeeId,
-          data.serviceType,
-          data.description,
-          data.notes      || null,
-          data.laborValue,
-          data.status,
-          data.paymentMethod  || null,
-          data.installments   || null,
-          data.warrantyUntil  || null,
-          data.checklist ? JSON.stringify(data.checklist) : null,
-          JSON.stringify(data.images || []),
-        ]
-      );
-
-      if (data.parts.length > 0) {
-        for (const p of data.parts) {
-          await client.query(
-            `INSERT INTO service_order_parts (service_order_id, part_id, quantity, price_at_time)
-             VALUES ($1,$2,$3,$4)`,
-            [data.id, p.partId, p.quantity, p.priceAtTime]
-          );
-        }
-        // Desconta estoque
-        await PartRepo.decrementStock(client, data.parts.map(p => ({ partId: p.partId, quantity: p.quantity })));
-      }
-
-      await client.query('COMMIT');
-      return await ServiceOrderRepo.getById(data.id);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    await pool.query(
+      `INSERT INTO service_orders
+         (id, entry_date, exit_date, customer_id, employee_id, service_type,
+          description, notes, labor_value, parts_description, parts_value, status,
+          payment_method, installments, warranty_until, checklist, images)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+      [
+        data.id,
+        data.entryDate,
+        data.exitDate || null,
+        data.customerId,
+        data.employeeId,
+        data.serviceType,
+        data.description,
+        data.notes || null,
+        data.laborValue,
+        data.partsDescription || '',
+        data.partsValue,
+        data.status,
+        data.paymentMethod || null,
+        data.installments || null,
+        data.warrantyUntil || null,
+        data.checklist ? JSON.stringify(data.checklist) : null,
+        JSON.stringify(data.images || []),
+      ]
+    );
+    return ServiceOrderRepo.getById(data.id);
   },
 
   async update(id: string, data: Partial<ServiceOrder>): Promise<ServiceOrder> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    const existing = await pool.query('SELECT * FROM service_orders WHERE id = $1', [id]);
+    if (!existing.rows.length) throw new Error(`O.S. ${id} não encontrada`);
+    const r = existing.rows[0];
 
-      const existing = await client.query('SELECT * FROM service_orders WHERE id = $1', [id]);
-      if (!existing.rows.length) throw new Error(`O.S. ${id} não encontrada`);
-      const r = existing.rows[0];
-
-      await client.query(
-        `UPDATE service_orders SET
+    await pool.query(
+      `UPDATE service_orders SET
            exit_date      = $1,
            employee_id    = $2,
            service_type   = $3,
            description    = $4,
            notes          = $5,
            labor_value    = $6,
-           status         = $7,
-           payment_method = $8,
-           installments   = $9,
-           warranty_until = $10,
-           checklist      = $11,
-           images         = $12,
+           parts_description = $7,
+           parts_value    = $8,
+           status         = $9,
+           payment_method = $10,
+           installments   = $11,
+           warranty_until = $12,
+           checklist      = $13,
+           images         = $14,
            updated_at     = NOW()
-         WHERE id = $13`,
-        [
-          data.exitDate       !== undefined ? data.exitDate       : r.exit_date,
-          data.employeeId     ?? r.employee_id,
-          data.serviceType    ?? r.service_type,
-          data.description    ?? r.description,
-          data.notes          !== undefined ? data.notes          : r.notes,
-          data.laborValue     ?? r.labor_value,
-          data.status         ?? r.status,
-          data.paymentMethod  !== undefined ? data.paymentMethod  : r.payment_method,
-          data.installments   !== undefined ? data.installments   : r.installments,
-          data.warrantyUntil  !== undefined ? data.warrantyUntil  : r.warranty_until,
-          data.checklist      !== undefined ? JSON.stringify(data.checklist) : r.checklist,
-          data.images         !== undefined ? JSON.stringify(data.images)    : r.images,
-          id,
-        ]
-      );
-
-      // Se as peças foram alteradas, reprocessa estoque
-      if (data.parts !== undefined) {
-        // Devolve estoque das peças antigas
-        const oldParts = await client.query(
-          'SELECT part_id, quantity FROM service_order_parts WHERE service_order_id = $1',
-          [id]
-        );
-        if (oldParts.rows.length > 0) {
-          await PartRepo.incrementStock(client, oldParts.rows.map((p: any) => ({
-            partId: p.part_id, quantity: parseInt(p.quantity)
-          })));
-        }
-
-        // Remove peças antigas e insere novas
-        await client.query('DELETE FROM service_order_parts WHERE service_order_id = $1', [id]);
-        for (const p of data.parts) {
-          await client.query(
-            `INSERT INTO service_order_parts (service_order_id, part_id, quantity, price_at_time)
-             VALUES ($1,$2,$3,$4)`,
-            [id, p.partId, p.quantity, p.priceAtTime]
-          );
-        }
-
-        if (data.parts.length > 0) {
-          await PartRepo.decrementStock(client, data.parts.map(p => ({ partId: p.partId, quantity: p.quantity })));
-        }
-      }
-
-      await client.query('COMMIT');
-      return await ServiceOrderRepo.getById(id);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+       WHERE id = $15`,
+      [
+        data.exitDate !== undefined ? data.exitDate : r.exit_date,
+        data.employeeId ?? r.employee_id,
+        data.serviceType ?? r.service_type,
+        data.description ?? r.description,
+        data.notes !== undefined ? data.notes : r.notes,
+        data.laborValue ?? r.labor_value,
+        data.partsDescription ?? r.parts_description,
+        data.partsValue ?? r.parts_value,
+        data.status ?? r.status,
+        data.paymentMethod !== undefined ? data.paymentMethod : r.payment_method,
+        data.installments !== undefined ? data.installments : r.installments,
+        data.warrantyUntil !== undefined ? data.warrantyUntil : r.warranty_until,
+        data.checklist !== undefined ? JSON.stringify(data.checklist) : r.checklist,
+        data.images !== undefined ? JSON.stringify(data.images) : r.images,
+        id,
+      ]
+    );
+    return ServiceOrderRepo.getById(id);
   },
 
   async getById(id: string): Promise<ServiceOrder> {
     const { rows } = await pool.query(
-      `${SERVICE_ORDER_SELECT} WHERE so.id = $1 GROUP BY so.id`,
+      'SELECT * FROM service_orders WHERE id = $1',
       [id]
     );
     if (!rows.length) throw new Error(`O.S. ${id} não encontrada`);
@@ -650,19 +510,100 @@ export const ExpenseRepo = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Quotes
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const QuoteRepo = {
+  async getAll(): Promise<Quote[]> {
+    const { rows } = await pool.query('SELECT * FROM quotes ORDER BY created_at DESC');
+    return rows.map(rowToQuote);
+  },
+
+  async create(data: Quote): Promise<Quote> {
+    const partsValue = data.requiredParts.reduce((sum, part) => sum + part.price, 0);
+    const { rows } = await pool.query(
+      `INSERT INTO quotes
+         (id, customer_id, service_type, required_parts, parts_items, labor_value, parts_value,
+          estimated_duration, vehicle_name, vehicle_make, vehicle_year, vehicle_model,
+          vehicle_engine, created_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       RETURNING *`,
+      [
+        data.id, data.customerId, data.serviceType,
+        data.requiredParts.map(part => part.name).join('\n'),
+        JSON.stringify(data.requiredParts),
+        data.laborValue, partsValue, data.estimatedDuration, data.vehicleName,
+        data.vehicleMake, data.vehicleYear, data.vehicleModel, data.vehicleEngine,
+        data.createdByUserId,
+      ]
+    );
+    return rowToQuote(rows[0]);
+  },
+
+  async update(id: string, data: Partial<Quote>): Promise<Quote> {
+    const existing = await pool.query('SELECT * FROM quotes WHERE id = $1', [id]);
+    if (!existing.rows.length) throw new Error(`Orçamento ${id} não encontrado`);
+    const r = existing.rows[0];
+    const parts = data.requiredParts ?? rowToQuote(r).requiredParts;
+    const partsValue = data.requiredParts
+      ? parts.reduce((sum, part) => sum + part.price, 0)
+      : r.parts_value;
+
+    const { rows } = await pool.query(
+      `UPDATE quotes SET
+         customer_id        = $1,
+         service_type       = $2,
+         required_parts     = $3,
+         parts_items        = $4,
+         labor_value        = $5,
+         parts_value        = $6,
+         estimated_duration = $7,
+         vehicle_name       = $8,
+         vehicle_make       = $9,
+         vehicle_year       = $10,
+         vehicle_model      = $11,
+         vehicle_engine     = $12,
+         updated_at         = NOW()
+       WHERE id = $13
+       RETURNING *`,
+      [
+        data.customerId ?? r.customer_id,
+        data.serviceType ?? r.service_type,
+        data.requiredParts ? data.requiredParts.map(part => part.name).join('\n') : r.required_parts,
+        JSON.stringify(parts),
+        data.laborValue ?? r.labor_value,
+        partsValue,
+        data.estimatedDuration ?? r.estimated_duration,
+        data.vehicleName ?? r.vehicle_name,
+        data.vehicleMake ?? r.vehicle_make,
+        data.vehicleYear ?? r.vehicle_year,
+        data.vehicleModel ?? r.vehicle_model,
+        data.vehicleEngine ?? r.vehicle_engine,
+        id,
+      ]
+    );
+    return rowToQuote(rows[0]);
+  },
+
+  async delete(id: string): Promise<void> {
+    await pool.query('DELETE FROM quotes WHERE id = $1', [id]);
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Carrega todo o estado inicial de uma vez (para o INIT do WebSocket)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function loadFullState() {
-  const [workshopInfo, users, employees, customers, parts, services, expenses] = await Promise.all([
+  const [workshopInfo, users, employees, customers, services, expenses, quotes] = await Promise.all([
     WorkshopRepo.get(),
     UserRepo.getAll(),
     EmployeeRepo.getAll(),
     CustomerRepo.getAll(),
-    PartRepo.getAll(),
     ServiceOrderRepo.getAll(),
     ExpenseRepo.getAll(),
+    QuoteRepo.getAll(),
   ]);
 
-  return { workshopInfo, users, employees, customers, parts, services, expenses };
+  return { workshopInfo, users, employees, customers, services, expenses, quotes };
 }

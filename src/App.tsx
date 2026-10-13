@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Users,
   Wrench,
-  Package,
   UserCircle,
   Calendar,
   Zap,
@@ -22,7 +21,8 @@ import {
   AlertCircle,
   Banknote,
   Receipt,
-  Loader2
+  Loader2,
+  ClipboardList
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -39,8 +39,8 @@ import {
 import { 
   Customer, 
   Employee, 
-  Part, 
   ServiceOrder, 
+  Quote,
   MonthlyExpense,
   CATEGORIES,
   User,
@@ -53,13 +53,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CustomerSection } from './components/sections/CustomerSection';
 import { EmployeeSection } from './components/sections/EmployeeSection';
 import { ServiceSection } from './components/sections/ServiceSection';
-import { InventorySection } from './components/sections/InventorySection';
 import { ExpenseSection } from './components/sections/ExpenseSection';
 import { SalarySection } from './components/sections/SalarySection';
 import { ProfileSection } from './components/sections/ProfileSection';
 import { SettingsSection } from './components/sections/SettingsSection';
+import { QuoteSection } from './components/sections/QuoteSection';
 
-type ActiveSection = 'dashboard' | 'customers' | 'employees' | 'services' | 'inventory' | 'expenses' | 'salaries' | 'profile' | 'settings';
+type ActiveSection = 'dashboard' | 'customers' | 'employees' | 'services' | 'quotes' | 'expenses' | 'salaries' | 'profile' | 'settings';
 
 // ─── Hook WebSocket ────────────────────────────────────────────────────────────
 function useWebSocket() {
@@ -151,8 +151,9 @@ export default function App() {
   const [workshopInfo, setWorkshopInfo] = useState<WorkshopInfo>({
     name: 'GR Oficina Mecânica', cnpj: '', address: '', phone: '', email: ''
   });
-  const [parts, setParts] = useState<Part[]>([]);
   const [services, setServices] = useState<ServiceOrder[]>([]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [quoteToConvert, setQuoteToConvert] = useState<Quote | null>(null);
   const [expenses, setExpenses] = useState<MonthlyExpense[]>([]);
 
   // Registra listeners de broadcast do servidor
@@ -164,8 +165,8 @@ export default function App() {
         setUsers(payload.users);
         setCustomers(payload.customers);
         setEmployees(payload.employees);
-        setParts(payload.parts);
         setServices(payload.services);
+        setQuotes(payload.quotes);
         setExpenses(payload.expenses);
         setInitialLoading(false);
       }),
@@ -173,8 +174,8 @@ export default function App() {
       on('USERS_UPDATED',     setUsers),
       on('CUSTOMERS_UPDATED', setCustomers),
       on('EMPLOYEES_UPDATED', setEmployees),
-      on('PARTS_UPDATED',     setParts),
       on('SERVICES_UPDATED',  setServices),
+      on('QUOTES_UPDATED',    setQuotes),
       on('EXPENSES_UPDATED',  setExpenses),
     ];
     return () => offs.forEach(off => off());
@@ -267,26 +268,6 @@ export default function App() {
     });
   }, [send]);
 
-  const handleSetParts: React.Dispatch<React.SetStateAction<Part[]>> = useCallback((action) => {
-    setParts(prev => {
-      const next = typeof action === 'function' ? action(prev) : action;
-      if (next.length > prev.length) {
-        const novo = next.find(n => !prev.some(p => p.id === n.id));
-        if (novo) send('CREATE_PART', novo);
-      } else if (next.length < prev.length) {
-        const removido = prev.find(p => !next.some(n => n.id === p.id));
-        if (removido) send('DELETE_PART', { id: removido.id });
-      } else {
-        const editado = next.find(n => {
-          const old = prev.find(p => p.id === n.id);
-          return old && JSON.stringify(old) !== JSON.stringify(n);
-        });
-        if (editado) send('UPDATE_PART', editado);
-      }
-      return prev;
-    });
-  }, [send]);
-
   const handleSetServices: React.Dispatch<React.SetStateAction<ServiceOrder[]>> = useCallback((action) => {
     setServices(prev => {
       const next = typeof action === 'function' ? action(prev) : action;
@@ -299,6 +280,26 @@ export default function App() {
           return old && JSON.stringify(old) !== JSON.stringify(n);
         });
         if (editada) send('UPDATE_SERVICE', editada);
+      }
+      return prev;
+    });
+  }, [send]);
+
+  const handleSetQuotes: React.Dispatch<React.SetStateAction<Quote[]>> = useCallback((action) => {
+    setQuotes(prev => {
+      const next = typeof action === 'function' ? action(prev) : action;
+      if (next.length > prev.length) {
+        const novo = next.find(quote => !prev.some(item => item.id === quote.id));
+        if (novo) send('CREATE_QUOTE', novo);
+      } else if (next.length < prev.length) {
+        const removido = prev.find(quote => !next.some(item => item.id === quote.id));
+        if (removido) send('DELETE_QUOTE', { id: removido.id });
+      } else {
+        const editado = next.find(quote => {
+          const old = prev.find(item => item.id === quote.id);
+          return old && JSON.stringify(old) !== JSON.stringify(quote);
+        });
+        if (editado) send('UPDATE_QUOTE', editado);
       }
       return prev;
     });
@@ -336,14 +337,12 @@ export default function App() {
   const financialStats = useMemo(() => {
     const totalServiceIncome = services.reduce((sum, s) => {
       if (s.status !== 'completed') return sum;
-      const partsTotal = s.parts.reduce((pSum, p) => pSum + (p.priceAtTime * p.quantity), 0);
-      return sum + s.laborValue + partsTotal;
+      return sum + s.laborValue + s.partsValue;
     }, 0);
 
     const accountsReceivable = services.reduce((sum, s) => {
       if (s.status === 'completed' || s.status === 'cancelled') return sum;
-      const partsTotal = s.parts.reduce((pSum, p) => pSum + (p.priceAtTime * p.quantity), 0);
-      return sum + s.laborValue + partsTotal;
+      return sum + s.laborValue + s.partsValue;
     }, 0);
     
     const paidExpenses = expenses.filter(e => e.isPaid).reduce((sum, e) => sum + e.amount, 0);
@@ -484,15 +483,27 @@ export default function App() {
             setServices={handleSetServices} 
             customers={customers} 
             employees={employees} 
-            parts={parts}
             role={currentUser?.role || 'mechanic'}
             currentUser={currentUser!}
             workshopInfo={workshopInfo}
+            quoteToConvert={quoteToConvert}
+            onQuoteConverted={() => setQuoteToConvert(null)}
           />
         );
-      case 'inventory': 
-        if (currentUser?.role === 'mechanic') return null;
-        return <InventorySection parts={parts} setParts={handleSetParts} />;
+      case 'quotes':
+        if (currentUser?.role !== 'admin' && currentUser?.role !== 'receptionist') return null;
+        return (
+          <QuoteSection
+            quotes={quotes}
+            setQuotes={handleSetQuotes}
+            customers={customers}
+            currentUser={currentUser}
+            onConvertQuote={(quote) => {
+              setQuoteToConvert(quote);
+              setActiveSection('services');
+            }}
+          />
+        );
       case 'expenses': 
         if (currentUser?.role !== 'admin') return null;
         return <ExpenseSection expenses={expenses} setExpenses={handleSetExpenses} />;
@@ -661,9 +672,9 @@ export default function App() {
             {[
               { id: 'dashboard',  label: 'Dashboard',    icon: LayoutDashboard, roles: ['admin','receptionist','mechanic'] },
               { id: 'services',   label: 'Serviços',     icon: Wrench,          roles: ['admin','receptionist','mechanic'] },
+              { id: 'quotes',     label: 'Orçamentos',   icon: ClipboardList,   roles: ['admin','receptionist'] },
               { id: 'customers',  label: 'Clientes',     icon: UserCircle,      roles: ['admin','receptionist'] },
               { id: 'employees',  label: 'Equipe',       icon: Users,           roles: ['admin'] },
-              { id: 'inventory',  label: 'Estoque',      icon: Package,         roles: ['admin','receptionist'] },
               { id: 'expenses',   label: 'Contas',       icon: Zap,             roles: ['admin'] },
               { id: 'salaries',   label: 'Folha Pagto',  icon: Calendar,        roles: ['admin'] },
               { id: 'profile',    label: 'Meu Perfil',   icon: UserCircle,      roles: ['admin','receptionist','mechanic'] },
@@ -693,8 +704,8 @@ export default function App() {
             setUsers([]);
             setCustomers([]);
             setEmployees([]);
-            setParts([]);
             setServices([]);
+            setQuotes([]);
             setExpenses([]);
           }}
             className="flex items-center gap-3 px-4 py-3 text-slate-500 hover:text-rose-600 font-medium transition-all w-full">

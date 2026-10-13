@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Plus, Wrench, Calendar, User, DollarSign, CheckCircle2, Clock, CreditCard, Banknote, Timer, X, Trash2, FileText, Save, MessageSquare, ShieldCheck, Fuel, Gauge, AlertTriangle, Camera, Search, Send, Image as ImageIcon } from 'lucide-react';
-import { ServiceOrder, Customer, Employee, Part, PaymentMethod, ServiceType, UserRole, WorkshopInfo, User as UserType, Checklist } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { Plus, Wrench, Calendar, User, DollarSign, CheckCircle2, Clock, CreditCard, Banknote, Timer, X, FileText, Save, MessageSquare, ShieldCheck, Fuel, Gauge, AlertTriangle, Camera, Search, Send, Image as ImageIcon } from 'lucide-react';
+import { ServiceOrder, Customer, Employee, PaymentMethod, Quote, ServiceType, UserRole, WorkshopInfo, User as UserType, Checklist } from '../../types';
 import { formatCurrency, cn } from '../../lib/utils';
 import { format, differenceInHours, differenceInMinutes, addMonths, isAfter } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -12,10 +12,11 @@ interface ServiceSectionProps {
   setServices: React.Dispatch<React.SetStateAction<ServiceOrder[]>>;
   customers: Customer[];
   employees: Employee[];
-  parts: Part[];
   role: UserRole;
   currentUser: UserType;
   workshopInfo: WorkshopInfo;
+  quoteToConvert?: Quote | null;
+  onQuoteConverted?: () => void;
 }
 
 const getPaymentLabel = (method?: PaymentMethod) => {
@@ -49,7 +50,17 @@ const calculateDuration = (entry: string, exit?: string) => {
   return `${minutes}m`;
 };
 
-export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setServices, customers, employees, parts, role, currentUser, workshopInfo }) => {
+export const ServiceSection: React.FC<ServiceSectionProps> = ({
+  services,
+  setServices,
+  customers,
+  employees,
+  role,
+  currentUser,
+  workshopInfo,
+  quoteToConvert,
+  onQuoteConverted,
+}) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [newOS, setNewOS] = useState<Partial<ServiceOrder>>({
@@ -58,7 +69,8 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
     serviceType: 'mechanical',
     description: '',
     laborValue: 0,
-    parts: [],
+    partsDescription: '',
+    partsValue: 0,
     status: 'pending',
     paymentMethod: 'cash',
     installments: 1,
@@ -70,6 +82,37 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
     },
     images: []
   });
+
+  useEffect(() => {
+    if (!quoteToConvert) return;
+    const serviceTypeLabel = {
+      mechanical: 'Mecânica',
+      electrical: 'Elétrica',
+      suspension: 'Suspensão',
+      brakes: 'Freios',
+      engine: 'Motor',
+      other: 'Outros',
+    }[quoteToConvert.serviceType];
+
+    setNewOS(prev => ({
+      ...prev,
+      customerId: quoteToConvert.customerId,
+      employeeId: '',
+      serviceType: quoteToConvert.serviceType,
+      description: `${serviceTypeLabel} - conforme orçamento #${quoteToConvert.id}`,
+      notes: [
+        `Veículo: ${quoteToConvert.vehicleName} • ${quoteToConvert.vehicleMake} ${quoteToConvert.vehicleYear}`,
+        `Modelo: ${quoteToConvert.vehicleModel} • Motor: ${quoteToConvert.vehicleEngine}`,
+        `Previsão do orçamento: ${quoteToConvert.estimatedDuration}`,
+      ].join('\n'),
+      laborValue: quoteToConvert.laborValue,
+      partsDescription: quoteToConvert.requiredParts
+        .map(part => `${part.name} (${formatCurrency(part.price)})`)
+        .join('\n'),
+      partsValue: quoteToConvert.requiredParts.reduce((sum, part) => sum + part.price, 0),
+    }));
+    setIsModalOpen(true);
+  }, [quoteToConvert]);
 
   const filteredServices = services.filter(s => {
     const customer = customers.find(c => c.id === s.customerId);
@@ -101,8 +144,7 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
     const doc = new jsPDF();
     const customer = customers.find(c => c.id === s.customerId);
     const employee = employees.find(e => e.id === s.employeeId);
-    const partsTotal = s.parts.reduce((sum, p) => sum + (p.priceAtTime * p.quantity), 0);
-    const total = s.laborValue + partsTotal;
+    const total = s.laborValue + s.partsValue;
 
     // Header
     doc.setFontSize(22);
@@ -152,7 +194,7 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
     doc.text('VALORES E PAGAMENTO', 20, 185);
     doc.setFontSize(10);
     doc.text(`Mão de Obra: ${formatCurrency(s.laborValue)}`, 20, 193);
-    doc.text(`Peças: ${formatCurrency(partsTotal)}`, 20, 198);
+    doc.text(`Peças: ${formatCurrency(s.partsValue)}`, 20, 198);
     
     doc.setFontSize(14);
     doc.text(`TOTAL: ${formatCurrency(total)}`, 20, 210);
@@ -187,8 +229,7 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
     const statusText = s.status === 'completed' ? 'está PRONTO' : 
                       s.status === 'in_progress' ? 'está EM ANDAMENTO' : 'foi RECEBIDO';
     
-    const partsTotal = s.parts.reduce((sum, p) => sum + (p.priceAtTime * p.quantity), 0);
-    const total = s.laborValue + partsTotal;
+    const total = s.laborValue + s.partsValue;
 
     const message = `Olá ${customer.name}! 👋\n\nInformamos que o serviço do seu veículo *${customer.vehicle}* (${customer.plate}) ${statusText}.\n\n*Resumo:* ${s.description}\n*Valor Total:* ${formatCurrency(total)}\n\nQualquer dúvida, estamos à disposição! 🛠️`;
     
@@ -214,21 +255,9 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
     });
   };
 
-  const handleAddPart = (partId: string) => {
-    const part = parts.find(p => p.id === partId);
-    if (!part) return;
-    
-    setNewOS(prev => ({
-      ...prev,
-      parts: [...(prev.parts || []), { partId, quantity: 1, priceAtTime: part.price }]
-    }));
-  };
-
-  const handleRemovePart = (index: number) => {
-    setNewOS(prev => ({
-      ...prev,
-      parts: (prev.parts || []).filter((_, i) => i !== index)
-    }));
+  const closeServiceModal = () => {
+    setIsModalOpen(false);
+    onQuoteConverted?.();
   };
 
   const handleAdd = (e: React.FormEvent) => {
@@ -243,13 +272,15 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
     } as ServiceOrder]);
     
     setIsModalOpen(false);
+    onQuoteConverted?.();
     setNewOS({
       customerId: '',
       employeeId: '',
       serviceType: 'mechanical',
       description: '',
       laborValue: 0,
-      parts: [],
+      partsDescription: '',
+      partsValue: 0,
       status: 'pending',
       paymentMethod: 'cash',
       installments: 1,
@@ -302,8 +333,7 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
         {filteredServices.map(s => {
           const customer = customers.find(c => c.id === s.customerId);
           const employee = employees.find(e => e.id === s.employeeId);
-          const partsTotal = s.parts.reduce((sum, p) => sum + (p.priceAtTime * p.quantity), 0);
-          const total = s.laborValue + partsTotal;
+          const total = s.laborValue + s.partsValue;
           const duration = calculateDuration(s.entryDate, s.exitDate);
 
           return (
@@ -323,7 +353,6 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
                         <span className="text-xs text-slate-400">•</span>
                         <span className="text-[10px] font-bold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded uppercase">
                           {s.serviceType === 'mechanical' ? 'Mecânica' : 
-                           s.serviceType === 'electrical' ? 'Elétrica' : 
                            s.serviceType === 'suspension' ? 'Suspensão' : 
                            s.serviceType === 'brakes' ? 'Freios' : 
                            s.serviceType === 'engine' ? 'Motor' : 'Outros'}
@@ -334,6 +363,9 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
                         </span>
                       </div>
                       <h3 className="text-lg font-bold text-slate-900">{s.description}</h3>
+                      {s.partsDescription && (
+                        <p className="text-xs text-slate-500">Peças: {s.partsDescription}</p>
+                      )}
                       <div className="flex flex-col gap-0.5">
                         {s.exitDate && (
                           <div className="text-[10px] text-emerald-600 font-semibold">
@@ -520,7 +552,7 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsModalOpen(false)}
+              onClick={closeServiceModal}
               className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm"
             />
             <motion.div 
@@ -531,7 +563,7 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
             >
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-bold text-slate-900">Nova Ordem de Serviço</h2>
-                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <button type="button" onClick={closeServiceModal} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
                   <X className="w-5 h-5 text-slate-500" />
                 </button>
               </div>
@@ -714,50 +746,27 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Peças Utilizadas</label>
-                    <select 
-                      onChange={(e) => {
-                        if (e.target.value) handleAddPart(e.target.value);
-                        e.target.value = '';
-                      }}
-                      className="text-xs font-bold text-brand-600 bg-brand-50 px-2 py-1 rounded-lg outline-none"
-                    >
-                      <option value="">+ Adicionar Peça</option>
-                      {parts.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({formatCurrency(p.price)})</option>
-                      ))}
-                    </select>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Peças Utilizadas</label>
+                    <textarea
+                      rows={2}
+                      value={newOS.partsDescription}
+                      onChange={e => setNewOS(prev => ({ ...prev, partsDescription: e.target.value }))}
+                      placeholder="Descreva as peças utilizadas (opcional)"
+                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500"
+                    />
                   </div>
-                  <div className="space-y-2">
-                    {newOS.parts?.map((p, idx) => {
-                      const partInfo = parts.find(part => part.id === p.partId);
-                      return (
-                        <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100">
-                          <span className="text-sm font-medium text-slate-700">{partInfo?.name}</span>
-                          <div className="flex items-center gap-4">
-                            <input 
-                              type="number" 
-                              min="1"
-                              value={p.quantity}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                setNewOS(prev => ({
-                                  ...prev,
-                                  parts: prev.parts?.map((item, i) => i === idx ? { ...item, quantity: val } : item)
-                                }));
-                              }}
-                              className="w-12 px-1 py-0.5 bg-white border border-slate-200 rounded text-center text-sm"
-                            />
-                            <span className="text-sm font-bold text-slate-600">{formatCurrency(p.priceAtTime * p.quantity)}</span>
-                            <button type="button" onClick={() => handleRemovePart(idx)} className="text-rose-500 hover:bg-rose-50 p-1 rounded">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Valor das Peças</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={newOS.partsValue}
+                      onChange={e => setNewOS(prev => ({ ...prev, partsValue: Number(e.target.value) }))}
+                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-500"
+                    />
                   </div>
                 </div>
 
@@ -790,9 +799,14 @@ export const ServiceSection: React.FC<ServiceSectionProps> = ({ services, setSer
                   )}
                 </div>
 
-                <button type="submit" className="w-full py-4 bg-brand-600 text-white font-bold rounded-xl shadow-lg hover:bg-brand-700 transition-all">
-                  Gerar Ordem de Serviço
-                </button>
+                <div className="flex gap-3">
+                  <button type="button" onClick={closeServiceModal} className="flex-1 py-4 text-slate-600 font-bold rounded-xl hover:bg-slate-100 transition-all">
+                    Cancelar
+                  </button>
+                  <button type="submit" className="flex-1 py-4 bg-brand-600 text-white font-bold rounded-xl shadow-lg hover:bg-brand-700 transition-all">
+                    Gerar Ordem de Serviço
+                  </button>
+                </div>
               </form>
             </motion.div>
           </div>
